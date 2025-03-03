@@ -11,6 +11,7 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         cb(null, 'uploads/');
@@ -31,7 +32,7 @@ if (!fs.existsSync('uploads')) {
 // Get presigned URL from Leonardo AI
 async function getPresignedUrl(extension = 'jpg') {
     try {
-        console.log('Requesting presigned URL...');
+        console.log(`Requesting presigned URL for extension: ${extension}`);
         const response = await axios.post(
             'https://cloud.leonardo.ai/api/rest/v1/init-image',
             { extension },
@@ -56,28 +57,27 @@ async function uploadImageToLeonardo(imagePath, uploadUrl, fields) {
     try {
         console.log('Preparing to upload image to S3...');
         
-       
+        const parsedFields = typeof fields === 'string' ? JSON.parse(fields) : fields;
+ 
         const formData = new FormData();
         
-        Object.entries(fields).forEach(([key, value]) => {
+      
+        Object.entries(parsedFields).forEach(([key, value]) => {
             formData.append(key, value);
         });
-        
-
+       
         const fileStream = fs.createReadStream(imagePath);
         formData.append('file', fileStream);
         
         console.log('Uploading to S3:', uploadUrl);
         
-        const headers = formData.getHeaders();
-        
-        console.log('Upload headers:', headers);
-        
+       
         const response = await axios.post(uploadUrl, formData, {
-            headers: headers,
+            headers: {
+                ...formData.getHeaders(),
+            },
             maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-            timeout: 60000
+            maxBodyLength: Infinity
         });
         
         console.log('Upload successful:', response.status);
@@ -87,7 +87,7 @@ async function uploadImageToLeonardo(imagePath, uploadUrl, fields) {
         
         if (error.response) {
             console.error('Error response status:', error.response.status);
-            console.error('Error response data:', typeof error.response.data === 'string' ? error.response.data : JSON.stringify(error.response.data));
+            console.error('Error response data:', error.response.data);
         } else {
             console.error('Error message:', error.message);
         }
@@ -96,6 +96,7 @@ async function uploadImageToLeonardo(imagePath, uploadUrl, fields) {
     }
 }
 
+// Generate image using the uploaded reference
 async function generateImage(imageId, prompt) {
     try {
         console.log('Generating image with ID:', imageId);
@@ -116,7 +117,7 @@ async function generateImage(imageId, prompt) {
             ]
         };
 
-        console.log('Sending generation request with payload:', JSON.stringify(payload));
+        console.log('Sending generation request');
         
         const response = await axios.post(
             'https://cloud.leonardo.ai/api/rest/v1/generations',
@@ -128,7 +129,6 @@ async function generateImage(imageId, prompt) {
                 } 
             }
         );
-
         console.log('Generation initiated, ID:', response.data.sdGenerationJob.generationId);
         return response.data.sdGenerationJob.generationId;
     } catch (error) {
@@ -168,7 +168,7 @@ async function getGeneratedImages(generationId) {
             
             attempts++;
             console.log('Waiting 10 seconds before next check...');
-            await new Promise(resolve => setTimeout(resolve, 10000));
+            await new Promise(resolve => setTimeout(resolve, 10000)); // Check every 10 seconds
         } catch (error) {
             console.error('Error checking generation status:', error);
             throw new Error(`Error retrieving generated images: ${error.message}`);
@@ -195,18 +195,17 @@ app.post('/upload', upload.single('image'), async (req, res) => {
 
         imagePath = req.file.path;
         console.log('Image saved to:', imagePath);
-        console.log('Prompt:', prompt);
         console.log('File info:', req.file);
 
-        // Step 1: Get presigned URL
-        console.log('Getting presigned URL...');
-        const fileExtension = path.extname(req.file.originalname).replace('.', '');
-        const { url: uploadUrl, fields, id: imageId } = await getPresignedUrl(fileExtension || 'jpg');
-        console.log('Received presigned URL and image ID:', imageId);
+        // Step 1: Get presigned URL with the correct file extension
+        const fileExtension = path.extname(req.file.originalname).replace('.', '') || 'jpg';
+        console.log(`Getting presigned URL for extension: ${fileExtension}`);
+        const uploadData = await getPresignedUrl(fileExtension);
+        console.log('Received presigned URL and image ID:', uploadData.id);
 
-        // Step 2: Upload image
+        // Step 2: Upload image - Using the format from Leonardo AI docs
         console.log('Uploading image to Leonardo AI...');
-        await uploadImageToLeonardo(imagePath, uploadUrl, fields);
+        await uploadImageToLeonardo(imagePath, uploadData.url, uploadData.fields);
         console.log('Image uploaded successfully');
         
         // Delete local file after upload
@@ -221,7 +220,7 @@ app.post('/upload', upload.single('image'), async (req, res) => {
 
         // Step 3: Generate new image
         console.log('Initiating image generation...');
-        const generationId = await generateImage(imageId, prompt);
+        const generationId = await generateImage(uploadData.id, prompt);
         console.log('Generation initiated, ID:', generationId);
 
         // Step 4: Retrieve generated images
@@ -247,11 +246,7 @@ app.post('/upload', upload.single('image'), async (req, res) => {
     }
 });
 
-// Add a health check route
-app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
-});
 
-// Start server
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
