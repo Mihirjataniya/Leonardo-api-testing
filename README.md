@@ -1,4 +1,4 @@
-# MERN Stack Application
+# LEONARDO API TESTING
 
 This is a **ERN (Express, React, Node.js)** stack application with separate `client` and `server` folders.
 
