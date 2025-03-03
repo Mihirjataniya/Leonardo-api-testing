@@ -112,7 +112,7 @@ async function generateImage(imageId, prompt) {
                     initImageId: imageId,
                     initImageType: 'UPLOADED',
                     preprocessorId: 133, // Canny edge preprocessor
-                    strengthType: 'High'
+                    strengthType: 'High',
                 }
             ]
         };
@@ -159,6 +159,7 @@ async function getGeneratedImages(generationId) {
             
             if (data.status === 'COMPLETE') {
                 console.log('Generation complete!');
+                console.log('Seed value used:', data.seed);
                 console.log('Number of images:', data.generated_images.length);
                 return data.generated_images.map(img => img.url);
             } else if (data.status === 'FAILED') {
